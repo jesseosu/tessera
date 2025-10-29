@@ -1,0 +1,27 @@
+{
+  "name": "cloudnative-ecommerce",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloud-native e-commerce platform built with AWS serverless services, event-driven architecture, and AI-powered search",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --coverage",
+    "lint": "eslint 'services/**/*.ts' 'shared/**/*.ts' 'infra/**/*.ts'",
+    "lint:fix": "eslint --fix 'services/**/*.ts' 'shared/**/*.ts' 'infra/**/*.ts'",
+    "build:infra": "cd infra && npm run build",
+    "deploy": "cd infra && npm run deploy",
+    "destroy": "cd infra && npm run destroy",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "devDependencies": {
+    "@jest/globals": "29.7.0",
+    "@types/jest": "29.5.12",
+    "jest": "29.7.0",
+    "ts-jest": "29.2.4",
+    "typescript": "5.4.5",
+    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "@typescript-eslint/parser": "7.18.0",
+    "eslint": "8.57.0"
+  }
+}
