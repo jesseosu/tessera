@@ -1,0 +1,20 @@
+{
+  "name": "infra",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "cdk": "cdk",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.153.0",
+    "constructs": "10.3.0",
+    "dotenv": "16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "5.4.5"
+  }
+}
