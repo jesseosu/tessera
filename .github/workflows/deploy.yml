@@ -1,0 +1,105 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+
+jobs:
+  deploy-infra:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    outputs:
+      api_url: ${{ steps.deploy.outputs.api_url }}
+      user_pool_id: ${{ steps.deploy.outputs.user_pool_id }}
+      user_pool_client_id: ${{ steps.deploy.outputs.user_pool_client_id }}
+      spa_url: ${{ steps.deploy.outputs.spa_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install CDK dependencies
+        run: cd infra && npm ci
+
+      - name: Deploy CDK stack
+        id: deploy
+        run: |
+          cd infra
+          npx cdk deploy --all --require-approval never --outputs-file ../cdk-outputs.json
+          # Parse outputs
+          echo "api_url=$(jq -r '.EcommerceStack.ApiUrl' ../cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "user_pool_id=$(jq -r '.EcommerceStack.UserPoolId' ../cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "user_pool_client_id=$(jq -r '.EcommerceStack.UserPoolClientId' ../cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "spa_url=$(jq -r '.EcommerceStack.SpaUrl' ../cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: deploy-infra
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build frontend with real env
+        run: |
+          cd frontend && npm ci
+          cat > .env << EOF
+          VITE_API_URL=${{ needs.deploy-infra.outputs.api_url }}
+          VITE_USER_POOL_ID=${{ needs.deploy-infra.outputs.user_pool_id }}
+          VITE_USER_POOL_CLIENT_ID=${{ needs.deploy-infra.outputs.user_pool_client_id }}
+          EOF
+          npm run build
+
+      - name: Upload to S3
+        run: |
+          BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name EcommerceStack --query "Stacks[0].Outputs[?OutputKey=='SiteBucket'].OutputValue" --output text 2>/dev/null || echo "")
+          if [ -n "$BUCKET_NAME" ]; then
+            aws s3 sync frontend/dist/ "s3://${BUCKET_NAME}" --delete
+          fi
+
+      - name: Invalidate CloudFront cache
+        run: |
+          DIST_ID=$(aws cloudformation describe-stacks --stack-name EcommerceStack --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text 2>/dev/null || echo "")
+          if [ -n "$DIST_ID" ]; then
+            aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
+          fi
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **API**: ${{ needs.deploy-infra.outputs.api_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **SPA**: ${{ needs.deploy-infra.outputs.spa_url }}" >> "$GITHUB_STEP_SUMMARY"

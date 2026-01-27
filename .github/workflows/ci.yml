@@ -1,0 +1,97 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: cd frontend && npm ci
+      - name: Build with placeholder env
+        run: |
+          cd frontend
+          echo "VITE_API_URL=https://placeholder.execute-api.ap-southeast-2.amazonaws.com/prod/" > .env
+          echo "VITE_USER_POOL_ID=ap-southeast-2_placeholder" >> .env
+          echo "VITE_USER_POOL_CLIENT_ID=placeholder" >> .env
+          npm run build
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+  synth-cdk:
+    name: CDK Synth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: cd infra && npm ci
+      - run: cd infra && npx cdk synth --no-lookups
+        env:
+          CDK_DEFAULT_ACCOUNT: '000000000000'
+          CDK_DEFAULT_REGION: ap-southeast-2
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high || true
+      - name: Check for secrets
+        run: |
+          # Check for common secret patterns in code
+          if grep -rn "AKIA[0-9A-Z]\{16\}\|aws_secret_access_key\|password\s*=\s*['\"]" --include="*.ts" --include="*.tsx" --include="*.json" services/ frontend/src/ shared/ 2>/dev/null; then
+            echo "::error::Potential secrets found in source code!"
+            exit 1
+          fi
+          echo "No secrets detected."
